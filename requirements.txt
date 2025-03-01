@@ -1,0 +1,4 @@
+playwright
+lxml
+pybeans>=1.12.4
+#playwright install chromium
