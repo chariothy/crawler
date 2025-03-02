@@ -1,4 +1,4 @@
-cache/
+.cache/
 *_local.py
 
 # Byte-compiled / optimized / DLL files

@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 NAME = 'dytt8'
 CU = CrawlerUtil(NAME)
-OUTPUT_FILE = f"./cache/{NAME}_list.html"
+OUTPUT_FILE = f"./.cache/{NAME}_list.html"
 
 # 配置参数
 BASE_URL = "https://dy2018.com"
@@ -120,7 +120,7 @@ def scrape_movie_links():
                     movie = dict(title_en=title_en, country=country, link=link)
                     #CU.debug(title_en.encode('raw_unicode_escape'), country.encode('raw_unicode_escape'))
                     movie_id = CU.extract_str(r'(\d+)', link)
-                    MOVIE_FILE = f"./cache/{NAME}_movie_{movie_id}.html"
+                    MOVIE_FILE = f"./.cache/{NAME}_movie_{movie_id}.html"
                     if CU.env()!='prod' and os.path.exists(MOVIE_FILE):
                         with open(MOVIE_FILE, "r", encoding="utf-8") as file:
                             html_content = file.read()
