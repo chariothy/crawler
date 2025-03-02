@@ -1,4 +1,4 @@
-import sys, os
+import sys, os, re
 from datetime import datetime as dt, date, timedelta, time as _time
 from typing import Pattern
 from pybeans import AppTool
@@ -6,6 +6,8 @@ import json
 import time
 import random
 import io
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
 class CrawlerUtil(AppTool):
     """
@@ -14,8 +16,18 @@ class CrawlerUtil(AppTool):
     def __init__(self, spider_name):
         super(CrawlerUtil, self).__init__(spider_name)
         self._session = None
+        self._engine = None
 
 
+    @property
+    def engine(self):
+        if self._engine is None:
+            assert(self['db'] is not None)
+            db = self['db']
+            self.debug(f'连接数据库：{db['db']}')
+            self._engine = create_engine(f"postgresql+psycopg://{db['user']}:{db['pwd']}@{db['host']}:{db['port']}/{db['db']}", echo=self.env()!='prod')
+        return self._engine
+    
     @property
     def session(self):
         """
@@ -23,16 +35,7 @@ class CrawlerUtil(AppTool):
         """
         if self._session:
             return self._session
-        assert(self['mysql'] is not None)
-        DB_CONN = 'mysql+mysqlconnector://{c[user]}:{c[pwd]}@{c[host]}:{c[port]}/{c[db]}?ssl_disabled=True' \
-            .format(c=self['mysql'])
-        engine = create_engine(
-            DB_CONN, 
-            pool_size=20, 
-            max_overflow=0, 
-            echo=self['log.sql'] == 1,
-            json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False))
-        self._session = sessionmaker(bind=engine)()
+        self._session = sessionmaker(bind=self.engine)
         return self._session
 
     def fail(self, **kwargs):
@@ -84,11 +87,6 @@ class CrawlerUtil(AppTool):
     def random(self):
         return random.Random().random()
     
-    
-    def ding(self, title: str, text: str):
-        result = notify_by_ding_talk(self['dingtalk'], title, text)
-        self.D(result)
-        
         
     def sleep(self, sec=3):
         time.sleep(sec)
@@ -100,7 +98,7 @@ class CrawlerUtil(AppTool):
     
     def env(self, key:str='ENV', default=''):
         env = os.environ.get(key, default=default)
-        self.D(f'>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ENV = {env} <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<')
+        self.debug(f'>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ENV = {env} <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<')
         return env
     
     
@@ -109,7 +107,7 @@ class CrawlerUtil(AppTool):
         return dt.strftime(a_date,to_format)
     
         
-    def extract_str(self, reg:Pattern, content:str, default=None):
+    def extract_str(self, reg_str:str, content:str, default=None):
         """从字符串中提取文本信息
 
         Args:
@@ -117,6 +115,7 @@ class CrawlerUtil(AppTool):
             content (str): 要提取内容的字符串
             default (str|None)
         """
+        reg = re.compile(reg_str, flags=re.IGNORECASE)
         match = reg.search(content)
         if match:
             groups = match.groups()

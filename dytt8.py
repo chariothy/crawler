@@ -1,13 +1,17 @@
 from playwright.sync_api import sync_playwright
 from urllib.parse import urljoin
-import re, time
+import re, time, os
 from lxml import etree
+from datetime import date
 from utils import CrawlerUtil
+from models.Movie import Movie
+
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 NAME = 'dytt8'
 CU = CrawlerUtil(NAME)
 OUTPUT_FILE = f"./cache/{NAME}_list.html"
-MOVIE_FILE = f"./cache/{NAME}_movie.html"
 
 # 配置参数
 BASE_URL = "https://dy2018.com"
@@ -21,20 +25,40 @@ DOUBAN_SCORE = 7.3
 
 # regex pattens
 regex_dict = {
-    'imdb': re.compile(r'◎IMDb评分\s+(\d+\.?\d*)/(\d+) from ([\d,]+) users', flags=re.IGNORECASE),
-    'douban': re.compile(r'◎豆瓣评分\s+(\d+\.?\d*)/(\d+) from ([\d,]+) users'),
-    #'datetime': re.compile(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'),
-    'title_cn': re.compile(r'◎译\s+名\s+(.*)'),
-    #'title_en': re.compile(r'◎片\s+名\s+(.*)'),
-    #'country': re.compile(r'◎产\s+地\s+(.*)'),
-    'category': re.compile(r'◎类\s+别\s+(.*)'),
-    'show_date': re.compile(r'◎上映日期\s+(\d{4}-\d{2}-\d{2})'),
-    'desc': re.compile(r'◎简\s+介\s+([^◎【】]+)')
+    'imdb': r'◎IMDb评分\s+(\d+\.?\d*)/(\d+) from ([\d,]+) users',
+    'douban': r'◎豆瓣评分\s+(\d+\.?\d*)/(\d+) from ([\d,]+) users',
+    #'datetime': r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})',
+    'title_cn': r'◎译\s+名\s+(.*)',
+    #'title_en': r'◎片\s+名\s+(.*)',
+    #'country': r'◎产\s+地\s+(.*)',
+    'category': r'◎类\s+别\s+(.*)',
+    'show_date': r'◎上映日期\s+(\d{4}-\d{2}-\d{2})',
+    'desc': r'◎简\s+介\s+([^◎【】]+)'
 }
 # reg for movie list
-title_en_reg = re.compile(r'◎片\s+名\s+([^◎]+)')
-country_reg = re.compile(r'◎产\s+地\s+([^◎]+)')
+title_en_reg = r'◎片\s+名\s+([^◎]+)'
+country_reg = r'◎产\s+地\s+([^◎]+)'
 movies = []
+
+def _save(movie):
+    insert_stmt = insert(Movie).values(**movie, created_at=date.today())
+    with CU.session.begin() as sess:
+        sess.execute(insert_stmt)
+        
+def _updated(title_en):
+    '''
+    检查当日是否已经更新
+    '''
+    # 构建查询语句
+    stmt = select(Movie).where(Movie.title_en == title_en)
+    with CU.session() as sess:
+        # 执行查询
+        result = sess.scalars(stmt).one_or_none()
+        # 检查日期
+        if result is not None:
+            CU.debug(f'"{title_en}"已经存在')
+            return True
+    return False
 
 def scrape_movie_links():
     with sync_playwright() as p:
@@ -95,17 +119,24 @@ def scrape_movie_links():
                 else: ## 高分电影，或没有评分，则打开详情页面
                     movie = dict(title_en=title_en, country=country, link=link)
                     #CU.debug(title_en.encode('raw_unicode_escape'), country.encode('raw_unicode_escape'))
-                    new_page = context.new_page()
-                    new_page.goto(urljoin(BASE_URL, link), timeout=60000)
-                    new_page.wait_for_selector(XPATH_DESCRIPTION, state="attached", timeout=30000)
-                            
+                    movie_id = CU.extract_str(r'(\d+)', link)
+                    MOVIE_FILE = f"./cache/{NAME}_movie_{movie_id}.html"
+                    if CU.env()!='prod' and os.path.exists(MOVIE_FILE):
+                        with open(MOVIE_FILE, "r", encoding="utf-8") as file:
+                            html_content = file.read()
+                    else:
+                        new_page = context.new_page()
+                        new_page.goto(urljoin(BASE_URL, link), timeout=60000)
+                        new_page.wait_for_selector(XPATH_DESCRIPTION, state="attached", timeout=30000)
+                                
                         # 获取整个页面的 HTML 源代码
-                    html_content = new_page.content()
-                    
-                    # 将 HTML 保存到文件
-                    with open(MOVIE_FILE, "w", encoding="utf-8") as file:
-                        file.write(html_content)
-                    #CU.debug(f"页面 HTML 已成功保存到: {MOVIE_FILE}")
+                        html_content = new_page.content()                    
+                        # 将 HTML 保存到文件
+                        with open(MOVIE_FILE, "w", encoding="utf-8") as file:
+                            file.write(html_content)
+                        #CU.debug(f"页面 HTML 已成功保存到: {MOVIE_FILE}")
+                        time.sleep(5)
+                        new_page.close()
                     movie_tree = etree.HTML(html_content)
                     
                     content_list = movie_tree.xpath('//div[@id="Zoom"]//text()')
@@ -128,17 +159,24 @@ def scrape_movie_links():
                     douban = float(movie['douban'])
                     if (imdb > 0 and imdb < IMDB_SCORE) or (douban > 0 and douban < DOUBAN_SCORE):
                         CU.debug(f'跳过低分电影:{title_en}, imdb:{imdb}, douban:{douban}')
-                        continue
-                    
-                    CU.debug(f'跳过低分电影:{title_en}, imdb:{imdb}, douban:{douban}')
-                    #movie['poster'] = movie_tree.xpath('//div[@id="Zoom"]//img/@src')
-                    #movie['magnets'] = movie_tree.xpath('//div[@id="downlist"]//a/@href')
-                    time.sleep(5)
-                    new_page.close()
-                    #CU.debug(movie)
-                    movies.append(movie)
+                    else:                  
+                        CU.info(f'找到高分电影:{title_en}, imdb:{imdb}, douban:{douban}')
+                        movie['full_link'] = urljoin(BASE_URL, link)
+                        #movie['poster'] = movie_tree.xpath('//div[@id="Zoom"]//img/@src')
+                        #movie['magnets'] = movie_tree.xpath('//div[@id="downlist"]//a/@href')
+                        #CU.debug(movie)
+                        
+                        if not _updated(movie['title_en']):
+                            _save(movie)
+                            movies.append(movie)
                     
             CU.info(movies)
+            if len(movies) > 0:
+                body = f'发现{len(movies)}部新高分电影'
+                subject = body
+                dingtalk_body = f"## {subject}"
+                dingtalk_body += '\n' + '\n'.join([f"- {r['title_cn']}, {r['title_en']}, {r['country']}, {r['category']}, {r['show_date']}, imdb={r['imdb']}, douban={r['douban']}" for r in movies])
+                CU.ding(subject, dingtalk_body)
             return movies
         
         except Exception as e:
