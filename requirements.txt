@@ -8,4 +8,4 @@ playwright
 lxml
 sqlalchemy
 psycopg[binary,pool]
-pybeans>=1.12.4
+pybeans>=1.13.0
