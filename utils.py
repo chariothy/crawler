@@ -17,6 +17,8 @@ class CrawlerUtil(AppTool):
         super(CrawlerUtil, self).__init__(spider_name)
         self._session = None
         self._engine = None
+        self.debug(f'>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ENV = {self.env()} <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<')
+
 
 
     @property
@@ -97,9 +99,7 @@ class CrawlerUtil(AppTool):
     
     
     def env(self, key:str='ENV', default=''):
-        env = os.environ.get(key, default=default)
-        self.debug(f'>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ENV = {env} <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<')
-        return env
+        return os.environ.get(key, default=default)
     
     
     def convert_date_str(self, date_str:str, from_format:str='%Y/%m/%d', to_format='%Y-%m-%d') -> str:
@@ -125,4 +125,3 @@ class CrawlerUtil(AppTool):
                 return default
         else:
             return default
-    

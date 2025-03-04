@@ -4,15 +4,18 @@ import re, time, os
 from lxml import etree
 from datetime import date
 from utils import CrawlerUtil
-from models.Movie import Movie
+from pybeans.utils import get_cached_file
+from models.Movie import Movie, Base
+
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 NAME = 'dytt8'
 CU = CrawlerUtil(NAME)
-OUTPUT_FILE = f"./.cache/{NAME}_list.html"
+Base.metadata.create_all(CU.engine) ## Must after orm class
 
+LIST_FILE = f"./.cache/{NAME}_list.html"
 # 配置参数
 BASE_URL = "https://dy2018.com"
 TARGET_URL = f"{BASE_URL}/html/gndy/dyzz/index.html"
@@ -56,7 +59,7 @@ def _updated(title_en):
         result = sess.scalars(stmt).one_or_none()
         # 检查日期
         if result is not None:
-            CU.debug(f'"{title_en}"已经存在')
+            CU.debug(f'《{title_en}》已经存在')
             return True
     return False
 
@@ -78,23 +81,30 @@ def scrape_movie_links():
         )
         
         page = context.new_page()
+        high_score_movies = []
         
         try:
-            CU.debug(f"Going to {TARGET_URL}")
-            # 导航到目标页面
-            page.goto(TARGET_URL, timeout=60000)
-            
-            # 等待主要内容加载
-            page.wait_for_selector(XPATH_LINKS, state="attached", timeout=30000)
-            
-                  # 获取整个页面的 HTML 源代码
-            html_content = page.content()
-            
-            # 将 HTML 保存到文件
-            with open(OUTPUT_FILE, "w", encoding="utf-8") as file:
-                file.write(html_content)
-            
-            CU.debug(f"页面 HTML 已成功保存到: {OUTPUT_FILE}")
+            if CU.env()!='prod' and get_cached_file(LIST_FILE):
+                CU.debug(f"Use cached file: {LIST_FILE}")
+                with open(LIST_FILE, "r", encoding="utf-8") as file:
+                    html_content = file.read()
+            else:           
+                CU.debug(f"Going to {TARGET_URL}")
+                # 导航到目标页面
+                page.goto(TARGET_URL, timeout=60000)
+                
+                # 等待主要内容加载
+                page.wait_for_selector(XPATH_LINKS, state="attached", timeout=30000)
+                            
+                # 获取整个页面的 HTML 源代码
+                html_content = page.content()
+                
+                # 将 HTML 保存到文件
+                CU.debug(f"Cached HTML in: {LIST_FILE}")
+                with open(LIST_FILE, "w", encoding="utf-8") as file:
+                    file.write(html_content)
+
+                CU.debug(f"页面 HTML 已成功保存到: {LIST_FILE}")
         
             list_tree = etree.HTML(html_content)
             table_sel = list_tree.xpath(XPATH_LINKS)
@@ -114,14 +124,15 @@ def scrape_movie_links():
                 title_en = CU.extract_str(title_en_reg, content)
                 country = CU.extract_str(country_reg, content)
                 if (imdb > 0 and imdb < IMDB_SCORE) or (douban > 0 and douban < DOUBAN_SCORE):
-                    CU.debug(f'跳过低分电影:{title_en}, imdb:{imdb}, douban:{douban}')
+                    CU.debug(f'跳过低分电影《{title_en}》, imdb:{imdb}, douban:{douban}')
                     continue
                 else: ## 高分电影，或没有评分，则打开详情页面
                     movie = dict(title_en=title_en, country=country, link=link)
                     #CU.debug(title_en.encode('raw_unicode_escape'), country.encode('raw_unicode_escape'))
                     movie_id = CU.extract_str(r'(\d+)', link)
                     MOVIE_FILE = f"./.cache/{NAME}_movie_{movie_id}.html"
-                    if CU.env()!='prod' and os.path.exists(MOVIE_FILE):
+                    if CU.env()!='prod' and get_cached_file(MOVIE_FILE):
+                        CU.debug(f"Use cached file: {MOVIE_FILE}")
                         with open(MOVIE_FILE, "r", encoding="utf-8") as file:
                             html_content = file.read()
                     else:
@@ -132,6 +143,7 @@ def scrape_movie_links():
                         # 获取整个页面的 HTML 源代码
                         html_content = new_page.content()                    
                         # 将 HTML 保存到文件
+                        CU.debug(f"Cached movie in: {MOVIE_FILE}")
                         with open(MOVIE_FILE, "w", encoding="utf-8") as file:
                             file.write(html_content)
                         #CU.debug(f"页面 HTML 已成功保存到: {MOVIE_FILE}")
@@ -153,14 +165,15 @@ def scrape_movie_links():
                         movie[key] = CU.extract_str(regex_dict[key], content)
                         
                     if not movie['imdb'] or not movie['douban']:
-                        CU.debug(f'没有评分:{title_en}')
+                        CU.debug(f'《{title_en}》没有评分')
                         continue
                     imdb = float(movie['imdb'])
                     douban = float(movie['douban'])
                     if (imdb > 0 and imdb < IMDB_SCORE) or (douban > 0 and douban < DOUBAN_SCORE):
-                        CU.debug(f'跳过低分电影:{title_en}, imdb:{imdb}, douban:{douban}')
+                        CU.debug(f'跳过低分电影《{title_en}》, imdb:{imdb}, douban:{douban}')
                     else:                  
-                        CU.info(f'找到高分电影:{title_en}, imdb:{imdb}, douban:{douban}')
+                        CU.info(f'找到高分电影《{title_en}》, imdb:{imdb}, douban:{douban}')
+                        high_score_movies.append(movie)
                         movie['full_link'] = urljoin(BASE_URL, link)
                         #movie['poster'] = movie_tree.xpath('//div[@id="Zoom"]//img/@src')
                         #movie['magnets'] = movie_tree.xpath('//div[@id="downlist"]//a/@href')
@@ -171,6 +184,7 @@ def scrape_movie_links():
                             movies.append(movie)
                     
             CU.info(movies)
+            CU.info(f"发现{len(high_score_movies)}部高分电影，新电影{len(movies)}部")
             if len(movies) > 0:
                 body = f'发现{len(movies)}部新高分电影'
                 subject = body

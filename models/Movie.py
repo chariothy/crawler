@@ -1,8 +1,5 @@
 from sqlalchemy import orm, Column, String, DATE, INTEGER, Text, Float, Boolean
 from sqlalchemy.dialects.postgresql import insert, JSONB
-from utils import CrawlerUtil
-
-CU = CrawlerUtil('movie')
 
 Base = orm.declarative_base()
 
@@ -23,6 +20,3 @@ class Movie(Base):
     show_date = Column(DATE, comment='上映日期')
     seen = Column(Boolean, default=False, comment='标志已看')
     created_at = Column(DATE, comment='更新日期')
-
-
-Base.metadata.create_all(CU.engine) ## Must after orm class
